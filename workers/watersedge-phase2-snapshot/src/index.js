@@ -1,8 +1,9 @@
 // ============================================================
-// watersedge-phase2-snapshot  v1.3.0
+// watersedge-phase2-snapshot  v1.4.0
 // Entry point - routing only. Edit individual src/ files.
 // v1.2.0: Phase 1+2 multiplayer chat rooms.
-// v1.3.0: Phase 3A data pipeline layer (D1+KV+R2+Vectorize smoke, content search).
+// v1.3.0: Phase 3A data pipeline layer (smoke test, content search).
+// v1.4.0: Phase 3B ingest pipeline (menu, wine, semantic search, content docs).
 // ============================================================
 
 import { j } from './utils.js';
@@ -24,13 +25,18 @@ import {
 import {
   handlePipelineStatus,
   handlePipelineSmoke,
-  handleR2List,
-  handleContentSearch
+  handleR2List
 } from './handlers/pipeline.js';
+import {
+  handleIngestMenu,
+  handleIngestWine,
+  handleContentSearch,
+  handleContentDocuments
+} from './handlers/ingest.js';
 import { renderChatRoom, renderChatRoomNotFound } from './render/chat_room.js';
 import { dbFirst } from './db.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const WORKER  = 'watersedge-phase2-snapshot';
 
 export default {
@@ -73,11 +79,16 @@ export default {
       return renderChatRoom(roomId, { title: room.title, messages: messages.results || [] });
     }
 
-    // --- Phase 3A: pipeline routes ---
+    // --- Phase 3A: pipeline infra routes ---
     if (method === 'GET'  && path === '/api/pipeline/status') return handlePipelineStatus(request, env, slug);
     if (method === 'POST' && path === '/api/pipeline/smoke')  return handlePipelineSmoke(request, env, slug);
     if (method === 'GET'  && path === '/api/content/r2-list') return handleR2List(request, env, slug);
-    if (method === 'GET'  && path === '/api/content/search')  return handleContentSearch(request, env, slug);
+
+    // --- Phase 3B: ingest + search routes ---
+    if (method === 'POST' && path === '/api/content/ingest/menu')  return handleIngestMenu(request, env, slug);
+    if (method === 'POST' && path === '/api/content/ingest/wine')  return handleIngestWine(request, env, slug);
+    if (method === 'GET'  && path === '/api/content/search')       return handleContentSearch(request, env, slug);
+    if (method === 'GET'  && path === '/api/content/documents')    return handleContentDocuments(request, env, slug);
 
     return j({ ok: false, error: 'not_found', path }, 404);
   }
