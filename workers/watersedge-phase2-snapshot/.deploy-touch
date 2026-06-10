@@ -1,2 +1,2 @@
-deploy-trigger=2026-06-09T00:00:00Z
-reason=manual-trigger-from-chatgpt
+# watersedge-phase2-snapshot - build trigger
+# Phase 3C + pipeline control panel + background ingest
