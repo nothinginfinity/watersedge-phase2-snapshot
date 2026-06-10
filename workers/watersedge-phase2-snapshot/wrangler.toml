@@ -11,17 +11,13 @@ binding = "DEMO_DB"
 database_name = "afo-demo-db"
 database_id = "00eddd4b-7e18-490f-83b5-e0ec1cb3dd8b"
 
-# KV: create via dashboard -> Workers & Pages -> KV -> Create namespace
-# Name: afo-demo-kv  Then paste the id below and uncomment.
-# [[kv_namespaces]]
-# binding = "DEMO_KV"
-# id = "PASTE_KV_NAMESPACE_ID_HERE"
+[[kv_namespaces]]
+binding = "DEMO_KV"
+id = "c861bd0c228e48a99a059bfc721821f8"
 
-# R2: create via dashboard -> R2 -> Create bucket
-# Name: afo-demo-assets  Then uncomment below.
-# [[r2_buckets]]
-# binding = "DEMO_R2"
-# bucket_name = "afo-demo-assets"
+[[r2_buckets]]
+binding = "DEMO_R2"
+bucket_name = "afo-demo-assets"
 
 [[vectorize]]
 binding = "DEMO_VECTOR"
