@@ -22,3 +22,6 @@ bucket_name = "afo-demo-assets"
 [[vectorize]]
 binding = "DEMO_VECTOR"
 index_name = "watersedge-afo-vector"
+
+[ai]
+binding = "AI"
