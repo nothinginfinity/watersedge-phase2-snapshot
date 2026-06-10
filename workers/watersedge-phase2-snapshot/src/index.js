@@ -1,6 +1,6 @@
 // ============================================================
-// watersedge-phase2-snapshot  v1.4.2
-// v1.4.2: pass ctx through all handlers so ingest can use waitUntil
+// watersedge-phase2-snapshot  v1.5.0
+// v1.5.0: Phase 5A - participant identity, join flow, player numbers
 // ============================================================
 
 import { j } from './utils.js';
@@ -14,6 +14,8 @@ import { handleChatWidget } from './handlers/chat_widget.js';
 import { handleAdmin, handleAdminPipeline, handleAdminAuth, handleAdminContent } from './handlers/admin.js';
 import {
   handleRoomCreate,
+  handleRoomJoin,
+  handleRoomParticipants,
   handleRoomMessages,
   handleRoomMessage,
   handleRoomAssistant,
@@ -33,9 +35,6 @@ import {
 import { renderChatRoom, renderChatRoomNotFound } from './render/chat_room.js';
 import { dbFirst } from './db.js';
 
-const VERSION = '1.4.2';
-const WORKER  = 'watersedge-phase2-snapshot';
-
 export default {
   async fetch(request, env, ctx) {
     const url    = new URL(request.url);
@@ -47,7 +46,6 @@ export default {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,Authorization,Cookie' }
     });
 
-    // --- core routes ---
     if (method === 'GET'  && path === '/')                  return handleHome(env, slug);
     if (method === 'GET'  && path === '/chat-widget.js')    return handleChatWidget();
     if ((method === 'POST' || method === 'GET') && path === '/api/publish') return handlePublish(env, slug);
@@ -60,14 +58,16 @@ export default {
     if (method === 'POST' && path === '/admin/auth')        return handleAdminAuth(request, env);
     if (method === 'POST' && path === '/admin/api/content') return handleAdminContent(request, env, slug);
 
-    // --- chat room routes ---
+    // Chat room routes
     if (method === 'POST' && path === '/api/chat/room/create')       return handleRoomCreate(request, env, slug);
+    if (method === 'POST' && path === '/api/chat/room/join')         return handleRoomJoin(request, env, slug);
+    if (method === 'GET'  && path === '/api/chat/room/participants') return handleRoomParticipants(request, env, slug);
     if (method === 'GET'  && path === '/api/chat/room/messages')     return handleRoomMessages(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/message')      return handleRoomMessage(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/assistant')    return handleRoomAssistant(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/summary-lead') return handleRoomSummaryLead(request, env, slug);
 
-    // --- chat room page ---
+    // Chat room page
     if (method === 'GET' && path === '/chat-room') {
       const roomId = url.searchParams.get('id') || '';
       if (!roomId) return renderChatRoomNotFound();
@@ -77,12 +77,10 @@ export default {
       return renderChatRoom(roomId, { title: room.title, messages: messages.results || [] });
     }
 
-    // --- pipeline infra routes ---
+    // Pipeline routes
     if (method === 'GET'  && path === '/api/pipeline/status') return handlePipelineStatus(request, env, slug);
     if (method === 'POST' && path === '/api/pipeline/smoke')  return handlePipelineSmoke(request, env, slug);
     if (method === 'GET'  && path === '/api/content/r2-list') return handleR2List(request, env, slug);
-
-    // --- ingest + search routes (ctx passed for waitUntil) ---
     if (method === 'POST' && path === '/api/content/ingest/menu')  return handleIngestMenu(request, env, ctx, slug);
     if (method === 'POST' && path === '/api/content/ingest/wine')  return handleIngestWine(request, env, ctx, slug);
     if (method === 'GET'  && path === '/api/content/search')       return handleContentSearch(request, env, slug);
