@@ -1,9 +1,6 @@
 // ============================================================
-// watersedge-phase2-snapshot  v1.4.0
-// Entry point - routing only. Edit individual src/ files.
-// v1.2.0: Phase 1+2 multiplayer chat rooms.
-// v1.3.0: Phase 3A data pipeline layer (smoke test, content search).
-// v1.4.0: Phase 3B ingest pipeline (menu, wine, semantic search, content docs).
+// watersedge-phase2-snapshot  v1.4.1
+// v1.4.1: /admin/pipeline control panel
 // ============================================================
 
 import { j } from './utils.js';
@@ -14,7 +11,7 @@ import { handleStatus } from './handlers/status.js';
 import { handleContent } from './handlers/content.js';
 import { handleChat } from './handlers/chat.js';
 import { handleChatWidget } from './handlers/chat_widget.js';
-import { handleAdmin, handleAdminAuth, handleAdminContent } from './handlers/admin.js';
+import { handleAdmin, handleAdminPipeline, handleAdminAuth, handleAdminContent } from './handlers/admin.js';
 import {
   handleRoomCreate,
   handleRoomMessages,
@@ -36,7 +33,7 @@ import {
 import { renderChatRoom, renderChatRoomNotFound } from './render/chat_room.js';
 import { dbFirst } from './db.js';
 
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const WORKER  = 'watersedge-phase2-snapshot';
 
 export default {
@@ -59,6 +56,7 @@ export default {
     if (method === 'GET'  && path === '/api/status')        return handleStatus(env, slug);
     if (method === 'GET'  && path === '/api/content')       return handleContent(env, slug);
     if (method === 'GET'  && path === '/admin')             return handleAdmin(request, env, slug);
+    if (method === 'GET'  && path === '/admin/pipeline')    return handleAdminPipeline(request, env, slug);
     if (method === 'POST' && path === '/admin/auth')        return handleAdminAuth(request, env);
     if (method === 'POST' && path === '/admin/api/content') return handleAdminContent(request, env, slug);
 
@@ -79,12 +77,12 @@ export default {
       return renderChatRoom(roomId, { title: room.title, messages: messages.results || [] });
     }
 
-    // --- Phase 3A: pipeline infra routes ---
+    // --- pipeline infra routes ---
     if (method === 'GET'  && path === '/api/pipeline/status') return handlePipelineStatus(request, env, slug);
     if (method === 'POST' && path === '/api/pipeline/smoke')  return handlePipelineSmoke(request, env, slug);
     if (method === 'GET'  && path === '/api/content/r2-list') return handleR2List(request, env, slug);
 
-    // --- Phase 3B: ingest + search routes ---
+    // --- ingest + search routes ---
     if (method === 'POST' && path === '/api/content/ingest/menu')  return handleIngestMenu(request, env, slug);
     if (method === 'POST' && path === '/api/content/ingest/wine')  return handleIngestWine(request, env, slug);
     if (method === 'GET'  && path === '/api/content/search')       return handleContentSearch(request, env, slug);
