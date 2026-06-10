@@ -1,6 +1,6 @@
 // ============================================================
-// watersedge-phase2-snapshot  v1.5.0
-// v1.5.0: Phase 5A - participant identity, join flow, player numbers
+// watersedge-phase2-snapshot  v1.6.0
+// v1.6.0: Phase 5B - order builder, cart, follow-up questions
 // ============================================================
 
 import { j } from './utils.js';
@@ -13,25 +13,12 @@ import { handleChat } from './handlers/chat.js';
 import { handleChatWidget } from './handlers/chat_widget.js';
 import { handleAdmin, handleAdminPipeline, handleAdminAuth, handleAdminContent } from './handlers/admin.js';
 import {
-  handleRoomCreate,
-  handleRoomJoin,
-  handleRoomParticipants,
-  handleRoomMessages,
-  handleRoomMessage,
-  handleRoomAssistant,
-  handleRoomSummaryLead
+  handleRoomCreate, handleRoomJoin, handleRoomParticipants,
+  handleRoomMessages, handleRoomMessage, handleRoomAssistant, handleRoomSummaryLead
 } from './handlers/chat_room.js';
-import {
-  handlePipelineStatus,
-  handlePipelineSmoke,
-  handleR2List
-} from './handlers/pipeline.js';
-import {
-  handleIngestMenu,
-  handleIngestWine,
-  handleContentSearch,
-  handleContentDocuments
-} from './handlers/ingest.js';
+import { handleOrderAdd, handleOrderNote, handleOrderGet, handleOrderRemove } from './handlers/order.js';
+import { handlePipelineStatus, handlePipelineSmoke, handleR2List } from './handlers/pipeline.js';
+import { handleIngestMenu, handleIngestWine, handleContentSearch, handleContentDocuments } from './handlers/ingest.js';
 import { renderChatRoom, renderChatRoomNotFound } from './render/chat_room.js';
 import { dbFirst } from './db.js';
 
@@ -58,7 +45,7 @@ export default {
     if (method === 'POST' && path === '/admin/auth')        return handleAdminAuth(request, env);
     if (method === 'POST' && path === '/admin/api/content') return handleAdminContent(request, env, slug);
 
-    // Chat room routes
+    // Chat room
     if (method === 'POST' && path === '/api/chat/room/create')       return handleRoomCreate(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/join')         return handleRoomJoin(request, env, slug);
     if (method === 'GET'  && path === '/api/chat/room/participants') return handleRoomParticipants(request, env, slug);
@@ -66,6 +53,12 @@ export default {
     if (method === 'POST' && path === '/api/chat/room/message')      return handleRoomMessage(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/assistant')    return handleRoomAssistant(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/summary-lead') return handleRoomSummaryLead(request, env, slug);
+
+    // Order builder
+    if (method === 'POST' && path === '/api/chat/room/order/add')    return handleOrderAdd(request, env, slug);
+    if (method === 'POST' && path === '/api/chat/room/order/note')   return handleOrderNote(request, env, slug);
+    if (method === 'POST' && path === '/api/chat/room/order/remove') return handleOrderRemove(request, env, slug);
+    if (method === 'GET'  && path === '/api/chat/room/order')        return handleOrderGet(request, env, slug);
 
     // Chat room page
     if (method === 'GET' && path === '/chat-room') {
@@ -77,7 +70,7 @@ export default {
       return renderChatRoom(roomId, { title: room.title, messages: messages.results || [] });
     }
 
-    // Pipeline routes
+    // Pipeline
     if (method === 'GET'  && path === '/api/pipeline/status') return handlePipelineStatus(request, env, slug);
     if (method === 'POST' && path === '/api/pipeline/smoke')  return handlePipelineSmoke(request, env, slug);
     if (method === 'GET'  && path === '/api/content/r2-list') return handleR2List(request, env, slug);
