@@ -1,6 +1,6 @@
 // src/handlers/chat_room.js - watersedge-phase2-snapshot
-// Phase 3D v2: Better steak/seafood separation, smarter general query handling,
-// participant names from room history when not set.
+// Phase 4: Structured card responses. Assistant returns reply_cards array
+// which the client renders as emoji cards with inline CTA.
 import { j, now } from '../utils.js';
 import { dbRun, dbFirst, dbAll, loadSection, defaultContact, defaultMenu } from '../db.js';
 
@@ -26,9 +26,8 @@ async function vectorSearch(env, queryVec, topK) {
 }
 
 async function fetchChunk(env, id) {
-  try {
-    return await dbFirst(env, 'SELECT id, type, title, body, metadata_json FROM knowledge_chunks WHERE id=?', [id]);
-  } catch (e) { return null; }
+  try { return await dbFirst(env, 'SELECT id,type,title,body,metadata_json FROM knowledge_chunks WHERE id=?', [id]); }
+  catch (e) { return null; }
 }
 
 function parseMeta(row) {
@@ -36,166 +35,360 @@ function parseMeta(row) {
 }
 
 function buildRoomContext(roomMessages) {
-  var userMessages = roomMessages.filter(function(m) { return m.role === 'user'; });
+  var userMsgs = roomMessages.filter(function(m) { return m.role === 'user'; });
   var participants = {};
-  userMessages.forEach(function(m) {
+  userMsgs.forEach(function(m) {
     var name = (m.name && m.name !== 'Guest') ? m.name : null;
     if (!name) return;
     if (!participants[name]) participants[name] = [];
     participants[name].push(m.message);
   });
   var names = Object.keys(participants);
-  var combined = userMessages.map(function(m) { return (m.name || 'Guest') + ': ' + m.message; }).join(' | ');
-  var prefs = names.map(function(n) { return n + ' said: ' + participants[n].slice(-2).join('; '); }).join(' / ');
+  var combined = userMsgs.map(function(m) { return (m.name||'Guest')+': '+m.message; }).join(' | ');
+  var prefs = names.map(function(n) { return n+' said: '+participants[n].slice(-2).join('; '); }).join(' / ');
   return { participants: names, combined: combined, prefs: prefs, multiParty: names.length > 1 };
 }
 
 function detectIntent(msg, ctx) {
-  var s = String(msg || '').toLowerCase();
-  // Wine always wins if explicit
+  var s = String(msg||'').toLowerCase();
   if (/wine|pairing|pairs with|bottle|glass|red wine|white wine|sparkling|ros[e\u00e9]|chardonnay|cabernet|pinot noir|pinot grigio|malbec|sauvignon/.test(s)) return 'wine';
   if (/brunch|breakfast|benedict|waffle|morning|chilaquile/.test(s)) return 'brunch';
   if (/date night|romantic|anniversary/.test(s)) return 'date_night';
-  // Steak before seafood so "steak" queries don't bleed into seafood
   if (/\bsteak\b|filet mignon|sirloin|flat iron|short rib/.test(s)) return 'steak';
   if (/seafood|fish|salmon|halibut|\bahi\b|scallop|lobster|cioppino|shrimp|mussel/.test(s)) return 'seafood';
   if (/private event|corporate|party|wedding|catering|buyout/.test(s)) return 'event';
   if (/reservation|book|reserve|table/.test(s)) return 'reservation';
   if (/starter|appetizer|lumpia|calamari|small plate/.test(s)) return 'starters';
   if (/\bwine\b|pair/.test(s)) return 'wine';
-  // History fallback
-  var h = String(ctx.combined || '').toLowerCase();
+  var h = String(ctx.combined||'').toLowerCase();
   if (/wine|pairing/.test(h)) return 'wine';
   if (/\bsteak\b/.test(h) && /seafood|salmon/.test(h)) return 'surf_turf';
   if (/brunch/.test(h)) return 'brunch';
   if (/date night/.test(h)) return 'date_night';
-  // Intro/greeting - don't try to answer with menu items
-  if (/hello|hi\b|hey|plan|dinner|lunch|tonight|tonight|visit|eat/.test(s)) return 'greeting';
+  if (/hello|hi\b|hey|plan|dinner|lunch|tonight|visit|eat/.test(s)) return 'greeting';
   return 'general';
 }
 
 function detectRoomIntent(messages) {
-  var combined = messages.map(function(m) { return m.message || ''; }).join(' ').toLowerCase();
+  var combined = messages.map(function(m) { return m.message||''; }).join(' ').toLowerCase();
   var intents = [];
-  if (/brunch|benedict|waffle|chilaquile/.test(combined)) intents.push('brunch');
-  if (/dinner|date night|evening|romantic/.test(combined)) intents.push('date night');
-  if (/private event|corporate|party|wedding|rehearsal|buyout/.test(combined)) intents.push('private event');
-  if (/seafood|salmon|halibut|ahi|scallop|cioppino|lobster/.test(combined)) intents.push('seafood');
-  if (/steak|filet|sirloin|beef/.test(combined)) intents.push('steak');
+  if (/brunch|benedict|waffle/.test(combined)) intents.push('brunch');
+  if (/date night|romantic/.test(combined)) intents.push('date night');
+  if (/private event|wedding/.test(combined)) intents.push('private event');
+  if (/seafood|salmon|halibut|ahi/.test(combined)) intents.push('seafood');
+  if (/\bsteak\b|filet/.test(combined)) intents.push('steak');
   if (/wine|pairing/.test(combined)) intents.push('wine');
-  if (/reservation|book|reserve|table/.test(combined)) intents.push('reservation');
+  if (/reservation|book|reserve/.test(combined)) intents.push('reservation');
   return intents.length ? intents.join(', ') : 'general inquiry';
 }
 
-function chunkBullet(chunk) {
+// -------------------------------------------------------
+// Emoji map for item categories/tags
+// -------------------------------------------------------
+var EMOJI = {
+  steak: '\uD83E\uDD69',
+  beef: '\uD83E\uDD69',
+  salmon: '\uD83D\uDC1F',
+  seafood: '\uD83E\uDD90',
+  scallops: '\uD83E\uDEA8',
+  lobster: '\uD83E\uDD9E',
+  ahi: '\uD83D\uDC1F',
+  halibut: '\uD83D\uDC1F',
+  brunch: '\uD83C\uDF73',
+  benedict: '\uD83C\uDF73',
+  waffle: '\uD83E\uDDC7',
+  burger: '\uD83C\uDF54',
+  pasta: '\uD83C\uDF5D',
+  risotto: '\uD83C\uDF5B',
+  soup: '\uD83C\uDF72',
+  starter: '\uD83E\uDD57',
+  vegetable: '\uD83E\uDD57',
+  pizza: '\uD83C\uDF55',
+  dessert: '\uD83C\uDF70',
+  white: '\uD83E\uDD42',
+  red: '\uD83C\uDF77',
+  sparkling: '\uD83E\uDD42',
+  rose: '\uD83C\uDF38'
+};
+
+function emojiForItem(tags, name) {
+  if (!Array.isArray(tags)) tags = [];
+  for (var i = 0; i < tags.length; i++) {
+    if (EMOJI[tags[i]]) return EMOJI[tags[i]];
+  }
+  var n = String(name||'').toLowerCase();
+  if (/salmon|halibut|ahi|fish/.test(n)) return '\uD83D\uDC1F';
+  if (/scallop/.test(n)) return '\uD83E\uDEA8';
+  if (/shrimp|lumpia/.test(n)) return '\uD83E\uDD90';
+  if (/lobster/.test(n)) return '\uD83E\uDD9E';
+  if (/steak|filet|sirloin|flat iron|short rib/.test(n)) return '\uD83E\uDD69';
+  if (/waffle/.test(n)) return '\uD83E\uDDC7';
+  if (/benedict|egg/.test(n)) return '\uD83C\uDF73';
+  if (/burger/.test(n)) return '\uD83C\uDF54';
+  if (/risotto|pasta/.test(n)) return '\uD83C\uDF5B';
+  if (/brussel|vegetable|avocado/.test(n)) return '\uD83E\uDD57';
+  if (/calamari|mussel/.test(n)) return '\uD83E\uDD90';
+  return '\u2022';
+}
+
+function emojiForWine(type) {
+  var t = String(type||'').toLowerCase();
+  if (t==='white') return '\uD83E\uDD42';
+  if (t==='red') return '\uD83C\uDF77';
+  if (t==='sparkling') return '\uD83E\uDD42';
+  if (t==='rose') return '\uD83C\uDF38';
+  return '\uD83C\uDF77';
+}
+
+// -------------------------------------------------------
+// Card builder helpers
+// -------------------------------------------------------
+function menuCard(chunk) {
   var meta = parseMeta(chunk);
   var name = meta.name || chunk.title || 'Item';
-  var price = meta.price ? ' (' + meta.price + ')' : '';
-  var bodyStr = String(chunk.body || '');
+  var bodyStr = String(chunk.body||'');
   var descMatch = bodyStr.match(/[^:]+:\s+[^.]+\.\s+(.+?)(?:\.\s+Tags|$)/);
-  var desc = descMatch ? ' \u2014 ' + descMatch[1].trim().split('.')[0] : '';
-  return '\u2022 ' + name + price + desc;
+  var desc = descMatch ? descMatch[1].trim().split('.')[0] : '';
+  var emoji = emojiForItem(meta.tags, name);
+  return { emoji: emoji, name: name, desc: desc, price: meta.price||'' };
 }
 
-function wineBullet(chunk) {
+function wineCard(chunk) {
   var meta = parseMeta(chunk);
   var name = meta.name || chunk.title || 'Wine';
-  var glass = meta.price_glass ? ' (' + meta.price_glass + '/glass' : '';
-  var bottle = meta.price_bottle ? ', ' + meta.price_bottle + '/btl)' : (glass ? ')' : '');
-  var detail = meta.varietal ? ' \u2014 ' + meta.varietal + (meta.region ? ', ' + meta.region : '') : '';
-  return '\u2022 ' + name + glass + bottle + detail;
+  var glass = meta.price_glass ? meta.price_glass+'/glass' : '';
+  var bottle = meta.price_bottle ? meta.price_bottle+'/bottle' : '';
+  var price = [glass, bottle].filter(Boolean).join(' \u00b7 ');
+  var detail = meta.varietal ? meta.varietal+(meta.region?', '+meta.region:'') : '';
+  var emoji = emojiForWine(meta.type);
+  return { emoji: emoji, name: name, desc: detail, price: price };
 }
 
-function buildReply(intent, menuChunks, wineChunks, msg, ctx, contact) {
-  var company = (contact && contact.company) || 'Waters Edge Restaurant and Bar';
-  var s = String(msg || '').toLowerCase();
+// -------------------------------------------------------
+// Build structured card response
+// Returns { intro, cards, cta_label, cta_action, outro }
+// -------------------------------------------------------
+function buildCards(intent, menuChunks, wineChunks, msg, ctx, contact) {
+  var company = (contact&&contact.company)||'Waters Edge';
+  var s = String(msg||'').toLowerCase();
   var names = ctx.participants;
   var multi = ctx.multiParty;
-  var groupLine = (multi && names.length > 1) ? 'Planning for ' + names.join(' and ') + ':\n\n' : '';
+  var groupLine = (multi&&names.length>1) ? 'Planning for '+names.join(' and ')+':' : '';
 
-  // Greeting / intro - warm response asking what they want
   if (intent === 'greeting') {
-    var who = multi ? names.join(' and ') : 'everyone';
-    return 'Welcome! Happy to help ' + who + ' plan a great meal at ' + company + '.\n\nWhat are you in the mood for? I can help with:\n\u2022 Seafood, steaks, or shared plates\n\u2022 Wine pairings\n\u2022 Brunch picks\n\u2022 Date night recommendations\n\u2022 Private event inquiries\n\u2022 Reservation requests';
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+'Welcome to '+company+'! What are you in the mood for?',
+      cards: [
+        {emoji:'\uD83E\uDD90',name:'Seafood',desc:'Salmon, Halibut, Ahi, Scallops, Cioppino'},
+        {emoji:'\uD83E\uDD69',name:'Steaks',desc:'Filet Mignon, Sirloin, Flat Iron, Short Rib'},
+        {emoji:'\uD83C\uDF77',name:'Wine Pairings',desc:'8 options from California, Oregon, France'},
+        {emoji:'\uD83C\uDF73',name:'Brunch',desc:'Benedict, Waffles, Chilaquiles and more'},
+        {emoji:'\uD83C\uDF89',name:'Private Events',desc:'Corporate, wedding, special occasions'}
+      ],
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: 'Tap a category above or type your question.'
+    };
   }
 
-  // Wine
   if (intent === 'wine') {
-    if (wineChunks.length === 0) {
-      return groupLine + 'For wine pairings, ask your server about our current selection. Want to build a reservation request?';
+    var wCards = wineChunks.slice(0,6).map(wineCard);
+    if (wCards.length === 0) {
+      wCards = [
+        {emoji:'\uD83C\uDF77',name:'Ask your server',desc:'Current wine list available on request',price:''}
+      ];
     }
     var pairingNote = '';
-    if (/salmon/.test(s)) pairingNote = 'For salmon specifically: Pinot Noir or Chardonnay are your best bets.\n\n';
-    else if (/steak|filet|beef|sirloin/.test(s)) pairingNote = 'For steak: Cabernet Sauvignon or Malbec are the go-to choices.\n\n';
-    else if (/seafood|halibut|scallop|shrimp/.test(s)) pairingNote = 'For seafood: Sauvignon Blanc or Chardonnay pair beautifully.\n\n';
-    var wineLines = wineChunks.slice(0, 6).map(wineBullet).join('\n');
-    var foodNote = menuChunks.length > 0 ? '\n\nFor the food, top picks:\n' + menuChunks.slice(0, 3).map(chunkBullet).join('\n') : '';
-    return groupLine + pairingNote + 'Wine options at ' + company + ':\n\n' + wineLines + foodNote + '\n\nWant to build a reservation request?';
+    if (/salmon/.test(s)) pairingNote = 'For salmon: Pinot Noir or Chardonnay.';
+    else if (/steak|filet|beef/.test(s)) pairingNote = 'For steak: Cabernet Sauvignon or Malbec.';
+    else if (/seafood|halibut|scallop/.test(s)) pairingNote = 'For seafood: Sauvignon Blanc or Chardonnay.';
+    var fCards = menuChunks.slice(0,3).map(menuCard);
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+(pairingNote?pairingNote+'\n\n':'')+'Wine options at '+company+':',
+      cards: wCards,
+      section2_label: fCards.length ? 'For the food:' : '',
+      section2_cards: fCards,
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
   }
 
-  // Surf and turf
   if (intent === 'surf_turf') {
-    var steakList = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&(m.tags.indexOf('steak')!==-1||m.tags.indexOf('beef')!==-1);});
-    var sfoodList = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&m.tags.indexOf('seafood')!==-1;});
-    var sLines = (steakList.length?steakList:menuChunks.slice(0,2)).slice(0,3).map(chunkBullet).join('\n') || '\u2022 Filet Mignon\n\u2022 Top Sirloin Steak';
-    var fLines = (sfoodList.length?sfoodList:menuChunks.slice(2,5)).slice(0,3).map(chunkBullet).join('\n') || '\u2022 Grilled Atlantic Salmon\n\u2022 Seafood Risotto';
-    var wRec = wineChunks.length ? '\n\nFor wine, Pinot Noir works beautifully for both steak and salmon \u2014 a great shared bottle.' : '';
-    return groupLine + 'Great combo \u2014 ' + company + ' has both covered:\n\nFor steak:\n' + sLines + '\n\nFor seafood:\n' + fLines + wRec + '\n\nWant to build a reservation request?';
+    var steakCards = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&(m.tags.indexOf('steak')!==-1||m.tags.indexOf('beef')!==-1);}).slice(0,3).map(menuCard);
+    var sfoodCards = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&m.tags.indexOf('seafood')!==-1;}).slice(0,3).map(menuCard);
+    if (!steakCards.length) steakCards=[{emoji:'\uD83E\uDD69',name:'Filet Mignon',desc:'Premium cut for a special dinner',price:''},{emoji:'\uD83E\uDD69',name:'Top Sirloin Steak',desc:'Classic steakhouse choice',price:''}];
+    if (!sfoodCards.length) sfoodCards=[{emoji:'\uD83D\uDC1F',name:'Grilled Atlantic Salmon',desc:'Refined coastal presentation',price:''},{emoji:'\uD83E\uDD90',name:'Seafood Risotto',desc:'Creamy date-night pick',price:''}];
+    var wNote = wineChunks.length ? 'Pinot Noir pairs beautifully with both \u2014 a great shared bottle.' : '';
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+'Great combo \u2014 '+company+' has both covered:',
+      section1_label: '\uD83E\uDD69 For steak:',
+      section1_cards: steakCards,
+      section2_label: '\uD83E\uDD90 For seafood:',
+      section2_cards: sfoodCards,
+      wine_note: wNote,
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
   }
 
-  // Steak - filter to ONLY steak/beef items
   if (intent === 'steak') {
-    var steakOnly = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&(m.tags.indexOf('steak')!==-1||m.tags.indexOf('beef')!==-1);});
-    var steakLines = steakOnly.length ? steakOnly.slice(0,5).map(chunkBullet).join('\n') : '\u2022 Filet Mignon \u2014 premium cut for a special dinner\n\u2022 Top Sirloin Steak\n\u2022 Flat Iron Steak\n\u2022 Slow Braised Short Rib';
-    var wPair = wineChunks.length ? '\n\nFor wine: ' + (parseMeta(wineChunks[0]).name||'Cabernet Sauvignon') + ' pairs perfectly with steak.' : '';
-    return groupLine + 'For steak at ' + company + ':\n\n' + steakLines + wPair + '\n\nWant to build a reservation request?';
+    var stkCards = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&(m.tags.indexOf('steak')!==-1||m.tags.indexOf('beef')!==-1);}).slice(0,5).map(menuCard);
+    if (!stkCards.length) stkCards=[
+      {emoji:'\uD83E\uDD69',name:'Filet Mignon',desc:'Premium cut, perfect for a special dinner',price:''},
+      {emoji:'\uD83E\uDD69',name:'Top Sirloin Steak',desc:'Classic steakhouse choice',price:''},
+      {emoji:'\uD83E\uDD69',name:'Flat Iron Steak',desc:'Hearty and flavorful',price:''},
+      {emoji:'\uD83E\uDD69',name:'Slow Braised Short Rib',desc:'Tender, rich comfort dish',price:''}
+    ];
+    var wPair = wineChunks.length ? (parseMeta(wineChunks[0]).name||'Cabernet Sauvignon')+' pairs perfectly.' : '';
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+'For steak at '+company+':',
+      cards: stkCards,
+      wine_note: wPair,
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
   }
 
-  // Seafood - filter to ONLY seafood items
   if (intent === 'seafood') {
-    var sfOnly = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&m.tags.indexOf('seafood')!==-1;});
-    var sfLines = sfOnly.length ? sfOnly.slice(0,6).map(chunkBullet).join('\n') : '\u2022 Grilled Atlantic Salmon\n\u2022 Seared Ahi Steak\n\u2022 Seafood Risotto\n\u2022 Bacon Jam Scallops\n\u2022 Pacific Halibut Fish N Chips\n\u2022 Cioppino';
-    var wPair2 = wineChunks.length ? '\n\nFor wine: ' + (parseMeta(wineChunks[0]).name||'Sauvignon Blanc') + ' pairs beautifully with seafood.' : '';
-    return groupLine + 'For seafood at ' + company + ':\n\n' + sfLines + wPair2 + '\n\nWant to build a reservation request?';
+    var sfCards = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&m.tags.indexOf('seafood')!==-1;}).slice(0,6).map(menuCard);
+    if (!sfCards.length) sfCards=[
+      {emoji:'\uD83D\uDC1F',name:'Grilled Atlantic Salmon',desc:'Refined coastal presentation',price:''},
+      {emoji:'\uD83D\uDC1F',name:'Seared Ahi Steak',desc:'Bold seafood entree',price:''},
+      {emoji:'\uD83E\uDD90',name:'Seafood Risotto',desc:'Creamy coastal date-night pick',price:''},
+      {emoji:'\uD83E\uDEA8',name:'Bacon Jam Scallops',desc:'Signature shared option',price:''},
+      {emoji:'\uD83D\uDC1F',name:'Pacific Halibut Fish N Chips',desc:'Crisp coastal classic',price:''},
+      {emoji:'\uD83E\uDD90',name:'Cioppino',desc:'Rich seafood stew',price:''}
+    ];
+    var wPair2 = wineChunks.length ? (parseMeta(wineChunks[0]).name||'Sauvignon Blanc')+' pairs beautifully with seafood.' : '';
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+'For seafood at '+company+':',
+      cards: sfCards,
+      wine_note: wPair2,
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
   }
 
-  // Other menu-grounded replies
+  if (intent === 'brunch') {
+    var brCards = menuChunks.filter(function(c){var m=parseMeta(c);return m.tags&&m.tags.indexOf('brunch')!==-1;}).slice(0,6).map(menuCard);
+    if (!brCards.length) brCards=[
+      {emoji:'\uD83C\uDF73',name:'Avocado Benedict',desc:'Brunch classic with avocado',price:''},
+      {emoji:'\uD83E\uDD9E',name:'Lobster Benedict',desc:'Premium seafood Benedict',price:''},
+      {emoji:'\uD83E\uDDC7',name:'Chicken & Waffles',desc:'Sweet and savory favorite',price:''},
+      {emoji:'\uD83C\uDF73',name:'Chorizo Chilaquiles',desc:'Bold brunch flavor',price:''},
+      {emoji:'\uD83E\uDD69',name:'Steak & Eggs',desc:'Classic hearty brunch',price:''},
+      {emoji:'\uD83D\uDC1F',name:'Salmon Burger',desc:'Seafood brunch option',price:''}
+    ];
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+'For brunch at '+company+':',
+      cards: brCards,
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
+  }
+
+  if (intent === 'date_night') {
+    return {
+      intro: (groupLine?groupLine+'\n\n':'')+'For date night at '+company+':',
+      cards: [
+        {emoji:'\uD83E\uDD69',name:'Filet Mignon',desc:'Premium cut for a special evening',price:''},
+        {emoji:'\uD83E\uDD90',name:'Seafood Risotto',desc:'Coastal date-night classic',price:''},
+        {emoji:'\uD83E\uDEA8',name:'Bacon Jam Scallops',desc:'Signature shared pick',price:''},
+        {emoji:'\uD83E\uDD69',name:'Slow Braised Short Rib',desc:'Tender and rich',price:''},
+        {emoji:'\uD83E\uDD42',name:'Sparkling Rose',desc:'Celebration bottle for the evening',price:'$14/glass'}
+      ],
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
+  }
+
+  if (intent === 'event') {
+    var ph = (contact&&contact.phone)||'';
+    return {
+      intro: company+' hosts private events, corporate gatherings, and special occasions.',
+      cards: [
+        {emoji:'\uD83C\uDF89',name:'Private Dining',desc:'Exclusive room and menu options'},
+        {emoji:'\uD83C\uDFE2',name:'Corporate Events',desc:'Team dinners and private gatherings'},
+        {emoji:'\uD83D\uDC8D',name:'Special Occasions',desc:'Birthdays, anniversaries, rehearsal dinners'}
+      ],
+      cta_label: 'Send Event Inquiry',
+      cta_action: 'reserve',
+      outro: ph?'Or call '+ph+' directly.':''
+    };
+  }
+
+  if (intent === 'reservation') {
+    return {
+      intro: 'Happy to help with a reservation at '+company+'.',
+      cards: [],
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
+  }
+
+  // General / fallback with whatever menu chunks we have
   if (menuChunks.length > 0) {
-    var intros = { brunch:'For brunch at '+company+':', date_night:'For date night at '+company+':', starters:'For shared starters at '+company+':' };
-    var intro = intros[intent] || 'Here are some picks from ' + company + ':';
-    var mLines = menuChunks.slice(0,6).map(chunkBullet).join('\n');
-    var wNote = wineChunks.length ? '\n\nFor wine, ' + (parseMeta(wineChunks[0]).name||'a house selection') + ' pairs well with this style of meal.' : '';
-    var cta = intent==='date_night' ? '\n\nShall I help turn this into a reservation request?' : '\n\nWant to build a reservation request or ask about something else?';
-    return groupLine + intro + '\n\n' + mLines + wNote + cta;
+    var genCards = menuChunks.slice(0,5).map(menuCard);
+    return {
+      intro: 'Here are some picks from '+company+':',
+      cards: genCards,
+      cta_label: 'Build Reservation Request',
+      cta_action: 'reserve',
+      outro: ''
+    };
   }
 
-  // Hardcoded fallbacks
-  var phone = (contact && contact.phone) || '';
-  if (intent==='event') return company+' hosts private events and special occasions. Want to send an inquiry?'+(phone?' Or call '+phone+'.':'');
-  if (intent==='reservation') return 'Happy to help with a reservation at '+company+'. Share your name, party size, and preferred date and time.'+(phone?' Or call '+phone+'.':'');
-  if (intent==='brunch') return groupLine+'For brunch at '+company+':\n\n\u2022 Avocado Benedict\n\u2022 Lobster Benedict\n\u2022 Chicken & Waffles\n\u2022 Chorizo Chilaquiles\n\u2022 Steak & Eggs\n\u2022 Salmon Burger\n\nWant to build a reservation request?';
-  if (intent==='date_night') return groupLine+'For date night at '+company+':\n\n\u2022 Filet Mignon\n\u2022 Seafood Risotto\n\u2022 Bacon Jam Scallops\n\u2022 Slow Braised Short Rib\n\nShall I help turn this into a reservation request?';
+  return {
+    intro: 'I can help plan a great meal at '+company+'.',
+    cards: [
+      {emoji:'\uD83E\uDD90',name:'Seafood picks',desc:'Ask me about salmon, halibut, scallops'},
+      {emoji:'\uD83E\uDD69',name:'Steaks',desc:'Filet, sirloin, flat iron, short rib'},
+      {emoji:'\uD83C\uDF77',name:'Wine pairings',desc:'Whites, reds, sparkling, and ros\u00e9'},
+      {emoji:'\uD83C\uDF73',name:'Brunch',desc:'Benedicts, waffles, chilaquiles'}
+    ],
+    cta_label: 'Build Reservation Request',
+    cta_action: 'reserve',
+    outro: ''
+  };
+}
 
-  return groupLine+'I can help plan a great meal at '+company+'. Ask about seafood, steaks, wine pairings, brunch, date night, or reservations.';
+// Plain text version of cards for storage/fallback
+function cardsToText(cardData) {
+  var lines = [];
+  if (cardData.intro) lines.push(cardData.intro);
+  var allCards = (cardData.cards||[]).concat(cardData.section1_cards||[]).concat(cardData.section2_cards||[]);
+  allCards.forEach(function(c) {
+    lines.push((c.emoji?c.emoji+' ':'') + c.name + (c.price?' ('+c.price+')':'') + (c.desc?' \u2014 '+c.desc:''));
+  });
+  if (cardData.wine_note) lines.push('\uD83C\uDF77 '+cardData.wine_note);
+  if (cardData.outro) lines.push(cardData.outro);
+  return lines.join('\n');
 }
 
 // Keyword fallback
 function flattenMenu(menu) {
   var out=[];
-  (menu&&Array.isArray(menu.menus)?menu.menus:[]).forEach(function(m){
-    (m.categories||[]).forEach(function(c){
-      (c.items||[]).forEach(function(item){
+  (menu&&Array.isArray(menu.menus)?menu.menus:[]).forEach(function(m) {
+    (m.categories||[]).forEach(function(c) {
+      (c.items||[]).forEach(function(item) {
         out.push({menu:m.name||'',category:c.name||'',name:item.name||'',description:item.description||'',price:item.price||'',tags:Array.isArray(item.tags)?item.tags:[]});
       });
     });
   });
   return out;
 }
-function kwSearch(menu,text,limit){
+function kwSearch(menu,text,limit) {
   var items=flattenMenu(menu);
   var s=String(text||'').toLowerCase();
   var terms=s.split(/[^a-z0-9]+/).filter(function(x){return x.length>2;});
-  return items.map(function(item){
+  return items.map(function(item) {
     var hay=(item.menu+' '+item.category+' '+item.name+' '+item.description+' '+item.tags.join(' ')).toLowerCase();
     var score=terms.reduce(function(sc,t){return sc+(hay.indexOf(t)!==-1?2:0);},0);
     return{item:item,score:score};
@@ -204,10 +397,10 @@ function kwSearch(menu,text,limit){
 
 // Route handlers
 export async function handleRoomCreate(request, env, slug) {
-  var body = await request.json().catch(function() { return {}; });
-  var intent = String(body.intent || '').trim();
-  var roomId = uid(); var ts = now();
-  var title = intent ? intent : 'Planning Room';
+  var body=await request.json().catch(function(){return{};});
+  var intent=String(body.intent||'').trim();
+  var roomId=uid();var ts=now();
+  var title=intent?intent:'Planning Room';
   await dbRun(env,'INSERT INTO chat_rooms (id,slug,title,status,created_at,updated_at) VALUES (?,?,?,?,?,?)',[roomId,slug,title,'open',ts,ts]);
   var welcomeMsg='Welcome to your Waters Edge planning room! Share this link with a friend to plan together. I can help with menu picks, wine pairings, brunch, date night, seafood, steaks, reservations, and private events.';
   await dbRun(env,'INSERT INTO chat_messages (id,room_id,slug,role,name,message,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?)',[uid(),roomId,slug,'assistant','Waters Edge',welcomeMsg,null,ts]);
@@ -254,9 +447,7 @@ export async function handleRoomAssistant(request, env, slug) {
   var contact=await loadSection(env,slug,'contact',defaultContact());
   var intent=detectIntent(message,ctx);
 
-  var menuChunks=[]; var wineChunks=[]; var mode='fallback';
-
-  // Rich query includes room context for better embedding
+  var menuChunks=[];var wineChunks=[];var mode='fallback';
   var richQuery=message+(ctx.prefs?' context: '+ctx.prefs.slice(0,150):'');
   var queryVec=await embedQuery(env,richQuery);
 
@@ -267,43 +458,39 @@ export async function handleRoomAssistant(request, env, slug) {
       for(var i=0;i<allMatches.length;i++){
         var m=allMatches[i];
         var mtype=(m.metadata&&m.metadata.type)?m.metadata.type:null;
-        if(!mtype){
-          var c=await fetchChunk(env,m.id);
-          if(c)mtype=c.type;
-        }
-        if(mtype==='wine_item'&&wineChunks.length<6){
-          var wc=await fetchChunk(env,m.id);
-          if(wc)wineChunks.push(wc);
-        } else if(mtype==='menu_item'&&menuChunks.length<8){
-          var mc=await fetchChunk(env,m.id);
-          if(mc)menuChunks.push(mc);
-        }
+        if(!mtype){var c=await fetchChunk(env,m.id);if(c)mtype=c.type;}
+        if(mtype==='wine_item'&&wineChunks.length<6){var wc=await fetchChunk(env,m.id);if(wc)wineChunks.push(wc);}
+        else if(mtype==='menu_item'&&menuChunks.length<8){var mc=await fetchChunk(env,m.id);if(mc)menuChunks.push(mc);}
       }
     }
   }
 
-  // Always fetch wine from D1 directly when intent is wine, as a safety net
+  // Wine safety net
   if(intent==='wine'&&wineChunks.length===0){
     mode='keyword';
     var wRows=await dbAll(env,'SELECT id,type,title,body,metadata_json FROM knowledge_chunks WHERE slug=? AND type=? ORDER BY created_at ASC LIMIT 8',[slug,'wine_item']);
     wineChunks=wRows;
   }
 
-  // D1 keyword fallback for menu
+  // Menu keyword fallback
   if(menuChunks.length===0&&intent!=='wine'&&intent!=='greeting'&&intent!=='event'&&intent!=='reservation'){
     if(mode!=='retrieval')mode='keyword';
     var menu=await loadSection(env,slug,'menu',defaultMenu());
-    var kwItems=kwSearch(menu,message+' '+ctx.combined,6);
+    var kwItems=kwSearch(menu,message+' '+ctx.combined,8);
     menuChunks=kwItems.map(function(item){
       return{id:item.name,type:'menu_item',title:item.name,body:(item.menu||'')+' - '+(item.category||'')+': '+item.name+'. '+(item.description||''),metadata_json:JSON.stringify({name:item.name,price:item.price,tags:item.tags,menu:item.menu,category:item.category})};
     });
   }
 
-  var reply=buildReply(intent,menuChunks,wineChunks,message,ctx,contact);
+  var cardData=buildCards(intent,menuChunks,wineChunks,message,ctx,contact);
+  var replyText=cardsToText(cardData);
   var ts=now();var msgId=uid();
-  await dbRun(env,'INSERT INTO chat_messages (id,room_id,slug,role,name,message,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?)',[msgId,roomId,slug,'assistant','Waters Edge',reply,JSON.stringify({mode:mode,intent:intent,participants:ctx.participants}),ts]);
+
+  await dbRun(env,'INSERT INTO chat_messages (id,room_id,slug,role,name,message,metadata_json,created_at) VALUES (?,?,?,?,?,?,?,?)',
+    [msgId,roomId,slug,'assistant','Waters Edge',replyText,JSON.stringify({mode:mode,intent:intent,participants:ctx.participants,cards:cardData}),ts]);
   await dbRun(env,'UPDATE chat_rooms SET updated_at=? WHERE id=?',[ts,roomId]);
-  return j({ok:true,reply:reply,message_id:msgId,mode:mode,intent:intent,participants:ctx.participants});
+
+  return j({ok:true,reply:replyText,reply_cards:cardData,message_id:msgId,mode:mode,intent:intent,participants:ctx.participants});
 }
 
 export async function handleRoomSummaryLead(request, env, slug) {
