@@ -1,35 +1,27 @@
 # watersedge-phase2-snapshot
 
-Blank multi-tenant demo worker. All content driven from shared `afo-demo-db` D1 database.
+**Phase 3C complete — retrieval-grounded chat, full data pipeline live.**
 
-## How it works
+## Live URLs
+- Site: https://watersedge-phase2-snapshot.jaredtechfit.workers.dev/
+- Admin: https://watersedge-phase2-snapshot.jaredtechfit.workers.dev/admin
+- Pipeline control: https://watersedge-phase2-snapshot.jaredtechfit.workers.dev/admin/pipeline
 
-Each demo deployment sets `DEMO_SLUG` in `wrangler.toml`. All D1 reads/writes are scoped to that slug.
+## Pipeline activation (do once, from /admin/pipeline)
+1. Smoke Test — verify all layers
+2. Ingest Menu — menu items → D1 → CF AI embed → Vectorize
+3. Ingest Wine — wine list → D1 → CF AI embed → Vectorize
+4. Test Semantic Search — verify retrieval is live
 
-## D1 Schema
+## Storage bindings
+- D1: `afo-demo-db`
+- KV: `afo-demo-kv`
+- R2: `afo-demo-assets`
+- Vectorize: `watersedge-afo-vector` (768d cosine)
+- AI: `@cf/baai/bge-base-en-v1.5`
 
-- `tenants` — slug, name, vertical, source_url
-- `demo_content` — (slug, section) → JSON data
-- `demo_leads` — contact form submissions per slug
-- `demo_snapshots` — pre-rendered HTML per slug
+## Source repo (active development)
+https://github.com/nothinginfinity/watersedge-demo-feature-lab
 
-## Sections
-
-- `contact` — company name, phone, address, hours, tagline, hero_image, colors
-- `services` — array of {id, name, desc}
-- `testimonials` — array of {name, role, quote}
-
-## Routes
-
-- `GET /` — homepage (snapshot or live render)
-- `POST /api/publish` — rebuild snapshot
-- `POST /api/lead` — contact form submission
-- `GET /api/status` — health + stats
-- `GET /api/content` — all content sections
-
-## Cloning a new demo
-
-1. Clone this worker repo
-2. Set `DEMO_SLUG` to the new demo slug (e.g. `watersedge`)
-3. Run `inject_business_data` with `tenant_slug: "watersedge"`
-4. Demo is live
+## Snapshot taken from
+https://github.com/nothinginfinity/watersedge-phase2-snapshot at Phase 2 completion.
