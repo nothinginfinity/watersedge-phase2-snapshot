@@ -1,6 +1,6 @@
 // ============================================================
-// watersedge-phase2-snapshot  v1.4.1
-// v1.4.1: /admin/pipeline control panel
+// watersedge-phase2-snapshot  v1.4.2
+// v1.4.2: pass ctx through all handlers so ingest can use waitUntil
 // ============================================================
 
 import { j } from './utils.js';
@@ -33,11 +33,11 @@ import {
 import { renderChatRoom, renderChatRoomNotFound } from './render/chat_room.js';
 import { dbFirst } from './db.js';
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 const WORKER  = 'watersedge-phase2-snapshot';
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url    = new URL(request.url);
     const path   = url.pathname.replace(/\/+$/, '') || '/';
     const method = request.method;
@@ -82,9 +82,9 @@ export default {
     if (method === 'POST' && path === '/api/pipeline/smoke')  return handlePipelineSmoke(request, env, slug);
     if (method === 'GET'  && path === '/api/content/r2-list') return handleR2List(request, env, slug);
 
-    // --- ingest + search routes ---
-    if (method === 'POST' && path === '/api/content/ingest/menu')  return handleIngestMenu(request, env, slug);
-    if (method === 'POST' && path === '/api/content/ingest/wine')  return handleIngestWine(request, env, slug);
+    // --- ingest + search routes (ctx passed for waitUntil) ---
+    if (method === 'POST' && path === '/api/content/ingest/menu')  return handleIngestMenu(request, env, ctx, slug);
+    if (method === 'POST' && path === '/api/content/ingest/wine')  return handleIngestWine(request, env, ctx, slug);
     if (method === 'GET'  && path === '/api/content/search')       return handleContentSearch(request, env, slug);
     if (method === 'GET'  && path === '/api/content/documents')    return handleContentDocuments(request, env, slug);
 
