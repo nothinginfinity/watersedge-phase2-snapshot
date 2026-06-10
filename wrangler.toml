@@ -1,0 +1,12 @@
+name = "watersedge-demo-feature-lab"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+[vars]
+DEMO_SLUG = "watersedge"
+
+[[d1_databases]]
+binding = "DEMO_DB"
+database_name = "afo-demo-db"
+database_id = "00eddd4b-7e18-490f-83b5-e0ec1cb3dd8b"
