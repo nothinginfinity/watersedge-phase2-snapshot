@@ -1,9 +1,8 @@
 // ============================================================
-// watersedge-phase2-snapshot  v1.2.0
+// watersedge-phase2-snapshot  v1.3.0
 // Entry point - routing only. Edit individual src/ files.
-// v1.1.1: allow GET /api/publish for browser-triggered demo publishes.
-// v1.1.2: add demo chat API and floating widget script route.
-// v1.2.0: Phase 1 multiplayer chat rooms.
+// v1.2.0: Phase 1+2 multiplayer chat rooms.
+// v1.3.0: Phase 3A data pipeline layer (D1+KV+R2+Vectorize smoke, content search).
 // ============================================================
 
 import { j } from './utils.js';
@@ -22,10 +21,16 @@ import {
   handleRoomAssistant,
   handleRoomSummaryLead
 } from './handlers/chat_room.js';
+import {
+  handlePipelineStatus,
+  handlePipelineSmoke,
+  handleR2List,
+  handleContentSearch
+} from './handlers/pipeline.js';
 import { renderChatRoom, renderChatRoomNotFound } from './render/chat_room.js';
-import { dbFirst, loadSection, defaultMenu } from './db.js';
+import { dbFirst } from './db.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const WORKER  = 'watersedge-phase2-snapshot';
 
 export default {
@@ -39,7 +44,7 @@ export default {
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,Authorization,Cookie' }
     });
 
-    // --- existing routes ---
+    // --- core routes ---
     if (method === 'GET'  && path === '/')                  return handleHome(env, slug);
     if (method === 'GET'  && path === '/chat-widget.js')    return handleChatWidget();
     if ((method === 'POST' || method === 'GET') && path === '/api/publish') return handlePublish(env, slug);
@@ -51,7 +56,7 @@ export default {
     if (method === 'POST' && path === '/admin/auth')        return handleAdminAuth(request, env);
     if (method === 'POST' && path === '/admin/api/content') return handleAdminContent(request, env, slug);
 
-    // --- Phase 1: chat room routes ---
+    // --- chat room routes ---
     if (method === 'POST' && path === '/api/chat/room/create')       return handleRoomCreate(request, env, slug);
     if (method === 'GET'  && path === '/api/chat/room/messages')     return handleRoomMessages(request, env, slug);
     if (method === 'POST' && path === '/api/chat/room/message')      return handleRoomMessage(request, env, slug);
@@ -67,6 +72,12 @@ export default {
       const messages = await (env.DEMO_DB.prepare('SELECT * FROM chat_messages WHERE room_id=? ORDER BY created_at ASC LIMIT 100').bind(roomId).all());
       return renderChatRoom(roomId, { title: room.title, messages: messages.results || [] });
     }
+
+    // --- Phase 3A: pipeline routes ---
+    if (method === 'GET'  && path === '/api/pipeline/status') return handlePipelineStatus(request, env, slug);
+    if (method === 'POST' && path === '/api/pipeline/smoke')  return handlePipelineSmoke(request, env, slug);
+    if (method === 'GET'  && path === '/api/content/r2-list') return handleR2List(request, env, slug);
+    if (method === 'GET'  && path === '/api/content/search')  return handleContentSearch(request, env, slug);
 
     return j({ ok: false, error: 'not_found', path }, 404);
   }
